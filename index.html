@@ -48,8 +48,7 @@
     class HeartParticle {
         constructor(scale) {
             this.scale = scale;
-
-            // Hədəf koordinat (ürək daxilində)
+            
             let valid = false;
             let rx, ry;
             while (!valid) {
@@ -64,7 +63,6 @@
             this.targetY = ry;
             this.z = (Math.random() - 0.5) * this.scale * 1.3;
 
-            // Başlanğıcda ekranın ətrafından yığılma koordinatları
             const angle = Math.random() * Math.PI * 2;
             const dist = Math.random() * canvas.width + 300;
             this.x = Math.cos(angle) * dist;
@@ -73,13 +71,10 @@
             this.size = Math.random() * 1.2 + 0.3;
             this.color = BLUE_SHADES[Math.floor(Math.random() * BLUE_SHADES.length)];
             this.alpha = Math.random() * 0.85 + 0.15;
-
-            // Yığılma sürəti (smooth lerp)
             this.ease = Math.random() * 0.03 + 0.015;
         }
 
         update() {
-            // Mərkəzdəki hədəf nöqtəyə doğru yavaşca sürüşmək (yığılma)
             this.x += (this.targetX - this.x) * this.ease;
             this.y += (this.targetY - this.y) * this.ease;
         }
@@ -100,7 +95,7 @@
             ctx.fillStyle = this.color;
             ctx.shadowBlur = 6 * scale3D;
             ctx.shadowColor = this.color;
-
+            
             ctx.beginPath();
             ctx.arc(screenX, screenY, finalSize, 0, Math.PI * 2);
             ctx.fill();
@@ -188,6 +183,29 @@
         ctx.restore();
     }
 
+    function drawText(cx, cy, beatScale) {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(beatScale, beatScale);
+
+        ctx.font = "bold 42px 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        // Parıltılı Neon Effekti
+        ctx.shadowColor = "#93c5fd";
+        ctx.shadowBlur = 20;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText("Hello mama", 0, 0);
+
+        ctx.shadowColor = "#3b82f6";
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = "#e0f2fe";
+        ctx.fillText("Hello mama", 0, 0);
+
+        ctx.restore();
+    }
+
     let time = 0;
 
     function animate() {
@@ -204,12 +222,15 @@
         });
 
         time += 0.04;
-        const beatScale = 1 + Math.sin(time * 2) * 0.03; // Zəif nəfəs alma effekti (dönmə yoxdur)
+        const beatScale = 1 + Math.sin(time * 2) * 0.03;
 
         particles.forEach(p => {
             p.update();
             p.draw(beatScale, cx, heartCenterY);
         });
+
+        // Ürəyin ortasında yazını çəkirik
+        drawText(cx, heartCenterY - 10, beatScale);
 
         requestAnimationFrame(animate);
     }
