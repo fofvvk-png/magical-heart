@@ -35,43 +35,47 @@
 
     const particles = [];
     const beamParticles = [];
-    const particleCount = 3500;
-    const BLUE_SHADES = ["#60a5fa", "#93c5fd", "#3b82f6", "#2563eb", "#bfdbfe", "#ffffff", "#e0f2fe"];
+    const particleCount = 3800;
+    const BLUE_SHADES = ["#60a5fa", "#93c5fd", "#3b82f6", "#2563eb", "#bfdbfe", "#ffffff", "#e0f2fe", "#38bdf8"];
 
-    function isInsideHeart(x, y, scale) {
-        const nx = x / scale;
-        const ny = -y / scale;
-        const a = nx * nx + ny * ny - 1;
-        return (a * a * a - nx * nx * ny * ny * ny) <= 0;
+    // Daha dəqiq və gözəl 3D ürək forması düsturu
+    function getHeartPoint(scale) {
+        let t = Math.random() * Math.PI * 2;
+        let u = Math.random(); // Daxili dolğunluq üçün
+        let r = Math.sqrt(u);
+
+        // Tam klassik ürək parametrik düsturu
+        let x = 16 * Math.pow(Math.sin(t), 3);
+        let y = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+
+        let factor = (scale / 16) * r;
+        return {
+            x: x * factor,
+            y: y * factor
+        };
     }
 
     class HeartParticle {
         constructor(scale) {
             this.scale = scale;
             
-            let valid = false;
-            let rx, ry;
-            while (!valid) {
-                rx = (Math.random() * 3 - 1.5) * this.scale;
-                ry = (Math.random() * 3 - 1.5) * this.scale;
-                if (isInsideHeart(rx, ry, this.scale)) {
-                    valid = true;
-                }
-            }
+            const pt = getHeartPoint(this.scale);
+            this.targetX = pt.x;
+            this.targetY = pt.y;
+            this.z = (Math.random() - 0.5) * this.scale * 1.1;
 
-            this.targetX = rx;
-            this.targetY = ry;
-            this.z = (Math.random() - 0.5) * this.scale * 1.3;
-
+            // Başlanğıcda kənarlardan uçuş
             const angle = Math.random() * Math.PI * 2;
-            const dist = Math.random() * canvas.width + 300;
+            const dist = Math.random() * canvas.width + 400;
             this.x = Math.cos(angle) * dist;
             this.y = Math.sin(angle) * dist;
 
-            this.size = Math.random() * 1.2 + 0.3;
+            this.size = Math.random() * 1.3 + 0.4;
             this.color = BLUE_SHADES[Math.floor(Math.random() * BLUE_SHADES.length)];
             this.alpha = Math.random() * 0.85 + 0.15;
-            this.ease = Math.random() * 0.03 + 0.015;
+            
+            // Yığılma sürəti daha tez edildi (0.05 - 0.08)
+            this.ease = Math.random() * 0.04 + 0.04;
         }
 
         update() {
@@ -142,9 +146,9 @@
         }
     }
 
-    const heartScale = 160;
-    const heartCenterY = canvas.height / 2 - 50;
-    const platformY = heartCenterY + 250;
+    const heartScale = 170;
+    const heartCenterY = canvas.height / 2 - 30;
+    const platformY = heartCenterY + 240;
 
     for (let i = 0; i < particleCount; i++) {
         particles.push(new HeartParticle(heartScale));
@@ -183,25 +187,37 @@
         ctx.restore();
     }
 
-    function drawText(cx, cy, beatScale) {
+    // Premium Zərif Mətn
+    function drawPremiumText(cx, cy, beatScale, time) {
         ctx.save();
         ctx.translate(cx, cy);
         ctx.scale(beatScale, beatScale);
 
-        ctx.font = "bold 42px 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+        // Zərif kaligrafik / modern şrift
+        ctx.font = "italic 600 44px 'Playfair Display', 'Georgia', 'Cinzel', serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
-        // Parıltılı Neon Effekti
+        // Yavaşca dəyişən parıltı işığı
+        const glowAmount = 15 + Math.sin(time * 3) * 8;
+
+        // Xarici Qızılı / Mavi Parıltı (Glow)
         ctx.shadowColor = "#93c5fd";
-        ctx.shadowBlur = 20;
-        ctx.fillStyle = "#ffffff";
+        ctx.shadowBlur = glowAmount;
+
+        // Gradient Rəng (Ağdan açıq göyə)
+        const gradient = ctx.createLinearGradient(-100, 0, 100, 0);
+        gradient.addColorStop(0, "#ffffff");
+        gradient.addColorStop(0.5, "#e0f2fe");
+        gradient.addColorStop(1, "#93c5fd");
+
+        ctx.fillStyle = gradient;
         ctx.fillText("Hello mama", 0, 0);
 
-        ctx.shadowColor = "#3b82f6";
-        ctx.shadowBlur = 10;
-        ctx.fillStyle = "#e0f2fe";
-        ctx.fillText("Hello mama", 0, 0);
+        // İncə kontur (Lüks görünüş üçün)
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.6)";
+        ctx.strokeText("Hello mama", 0, 0);
 
         ctx.restore();
     }
@@ -229,8 +245,8 @@
             p.draw(beatScale, cx, heartCenterY);
         });
 
-        // Ürəyin ortasında yazını çəkirik
-        drawText(cx, heartCenterY - 10, beatScale);
+        // Premium Mətn
+        drawPremiumText(cx, heartCenterY, beatScale, time);
 
         requestAnimationFrame(animate);
     }
