@@ -2,6 +2,7 @@
 <html lang="az">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D Magical Glowing Heart</title>
     <style>
         * {
@@ -9,16 +10,90 @@
             padding: 0;
             box-sizing: border-box;
         }
-        body {
+        html, body {
+            width: 100%;
+            height: 100%;
             background-color: #030712;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
             overflow: hidden;
         }
         canvas {
             display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+            cursor: grab;
+        }
+        canvas:active {
+            cursor: grabbing;
+        }
+
+        /* ↑ işarəsi */
+        #swipeHint {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: calc(14px + env(safe-area-inset-bottom));
+            display: flex;
+            justify-content: center;
+            pointer-events: none;
+            color: rgba(191, 219, 254, 0.9);
+            transition: opacity 0.6s;
+        }
+        #swipeHint svg {
+            filter: drop-shadow(0 0 6px rgba(96, 165, 250, 0.9));
+            animation: hintBounce 1.8s ease-in-out infinite;
+        }
+        #swipeHint.hidden {
+            opacity: 0;
+        }
+        @keyframes hintBounce {
+            0%, 100% { transform: translateY(0); opacity: 0.45; }
+            50% { transform: translateY(-9px); opacity: 1; }
+        }
+
+        /* Tökülən ürəklər */
+        #loveLayer {
+            position: fixed;
+            inset: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        .fall-heart {
+            position: absolute;
+            top: -8vh;
+            line-height: 1;
+            text-shadow: 0 0 8px rgba(255, 45, 85, 0.8);
+            will-change: transform;
+            animation: fall linear forwards;
+        }
+        @keyframes fall {
+            0%   { transform: translate3d(0, 0, 0) rotate(0deg); opacity: 0; }
+            8%   { opacity: 1; }
+            100% { transform: translate3d(var(--sway), 118vh, 0) rotate(var(--rot)); opacity: 0.9; }
+        }
+
+        /* I love you yazısı */
+        #loveText {
+            position: fixed;
+            left: 0;
+            right: 0;
+            text-align: center;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            color: #ffffff;
+            font-family: "Segoe Script", "Brush Script MT", "Lucida Handwriting", cursive;
+            text-shadow: 0 0 12px #ff4d6d, 0 0 28px #ff2d55, 0 0 48px #e11d48;
+        }
+        #loveText.show {
+            animation: loveShow 5.5s ease forwards;
+        }
+        @keyframes loveShow {
+            0%   { opacity: 0; transform: scale(0.6); }
+            12%  { opacity: 1; transform: scale(1.1); }
+            20%  { opacity: 1; transform: scale(1); }
+            85%  { opacity: 1; transform: scale(1); }
+            100% { opacity: 0; transform: scale(1.05); }
         }
     </style>
 </head>
@@ -26,199 +101,413 @@
 
 <canvas id="heartCanvas"></canvas>
 
+<div id="loveLayer"></div>
+<div id="loveText">I love you</div>
+<div id="swipeHint" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 19V5"></path>
+        <path d="M5 12l7-7 7 7"></path>
+    </svg>
+</div>
+
 <script>
     const canvas = document.getElementById('heartCanvas');
     const ctx = canvas.getContext('2d');
+    const TAU = Math.PI * 2;
 
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-
-    const particles = [];
-    const beamParticles = [];
-    const particleCount = 3500;
     const BLUE_SHADES = ["#60a5fa", "#93c5fd", "#3b82f6", "#2563eb", "#bfdbfe", "#ffffff", "#e0f2fe"];
+    const isSmallScreen = Math.min(window.innerWidth, window.innerHeight) < 600;
+    const PARTICLE_COUNT = isSmallScreen ? 2200 : 3500;
+    const BEAM_COUNT = isSmallScreen ? 80 : 120;
 
-    function isInsideHeart(x, y, scale) {
-        const nx = x / scale;
-        const ny = -y / scale;
+    // ---------- Ekran ölçüsünə görə yerləşmə ----------
+    let W, H, DPR, S, cx, cy, platformY, fov;
+
+    function layout() {
+        DPR = Math.min(window.devicePixelRatio || 1, 2);
+        W = window.innerWidth;
+        H = window.innerHeight;
+        canvas.width = Math.round(W * DPR);
+        canvas.height = Math.round(H * DPR);
+        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+        S = Math.min(W / 3.8, H / 4.0, 170);   // ürəyin ölçüsü
+        cx = W / 2;
+        cy = H / 2 - S * 0.3;                  // ürəyin mərkəzi
+        platformY = cy + S * 1.55;             // platforma
+        fov = S * 2.8;
+
+        ctx.fillStyle = "#030712";
+        ctx.fillRect(0, 0, W, H);
+    }
+
+    // ---------- Parlaq nöqtə şəkilləri (shadowBlur əvəzinə, daha sürətli) ----------
+    function hexToRgba(hex, a) {
+        const n = parseInt(hex.slice(1), 16);
+        return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+    }
+
+    const sprites = BLUE_SHADES.map(color => {
+        const s = document.createElement('canvas');
+        s.width = s.height = 32;
+        const g = s.getContext('2d');
+        const gr = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+        gr.addColorStop(0, "#ffffff");
+        gr.addColorStop(0.25, hexToRgba(color, 0.95));
+        gr.addColorStop(1, hexToRgba(color, 0));
+        g.fillStyle = gr;
+        g.fillRect(0, 0, 32, 32);
+        return s;
+    });
+
+    // ---------- Ürək tənliyi (vahid koordinatlarda) ----------
+    function isInsideHeart(x, y) {
+        const nx = x;
+        const ny = -y;
         const a = nx * nx + ny * ny - 1;
         return (a * a * a - nx * nx * ny * ny * ny) <= 0;
     }
 
+    // ---------- Partlama və fırlanma vəziyyəti ----------
+    let burstTimer = 0;
+    let rotY = 0;
+    let rotVel = 0;
+    let dragging = false;
+
+    // Hissəciklərin koordinatları ekran pikseli deyil, ürək ölçüsünə (S) nisbətindədir.
+    // Buna görə pəncərə ölçüsü dəyişəndə hər şey avtomatik uyğunlaşır.
     class HeartParticle {
-        constructor(scale) {
-            this.scale = scale;
+        constructor() {
+            let ux, uy;
+            do {
+                ux = Math.random() * 3 - 1.5;
+                uy = Math.random() * 3 - 1.5;
+            } while (!isInsideHeart(ux, uy));
 
-            // Hədəf koordinat (ürək daxilində)
-            let valid = false;
-            let rx, ry;
-            while (!valid) {
-                rx = (Math.random() * 3 - 1.5) * this.scale;
-                ry = (Math.random() * 3 - 1.5) * this.scale;
-                if (isInsideHeart(rx, ry, this.scale)) {
-                    valid = true;
-                }
-            }
+            this.tx = ux;
+            this.ty = uy;
+            this.tz = (Math.random() - 0.5) * 0.9;
 
-            this.targetX = rx;
-            this.targetY = ry;
-            this.z = (Math.random() - 0.5) * this.scale * 1.3;
-
-            // Başlanğıcda ekranın ətrafından yığılma koordinatları
-            const angle = Math.random() * Math.PI * 2;
-            const dist = Math.random() * canvas.width + 300;
+            // Başlanğıcda ekranın ətrafından yığılma
+            const angle = Math.random() * TAU;
+            const dist = 2.5 + Math.random() * 3.5;
             this.x = Math.cos(angle) * dist;
             this.y = Math.sin(angle) * dist;
+            this.z = (Math.random() - 0.5) * 2;
+
+            this.vx = 0;
+            this.vy = 0;
+            this.vz = 0;
 
             this.size = Math.random() * 1.2 + 0.3;
-            this.color = BLUE_SHADES[Math.floor(Math.random() * BLUE_SHADES.length)];
+            this.sprite = sprites[Math.floor(Math.random() * sprites.length)];
             this.alpha = Math.random() * 0.85 + 0.15;
-
-            // Yığılma sürəti (smooth lerp)
             this.ease = Math.random() * 0.03 + 0.015;
         }
 
-        update() {
-            // Mərkəzdəki hədəf nöqtəyə doğru yavaşca sürüşmək (yığılma)
-            this.x += (this.targetX - this.x) * this.ease;
-            this.y += (this.targetY - this.y) * this.ease;
+        burst() {
+            const angle = Math.random() * TAU;
+            const speed = 0.03 + Math.random() * 0.06;
+            this.vx = Math.cos(angle) * speed;
+            this.vy = Math.sin(angle) * speed;
+            this.vz = (Math.random() - 0.5) * speed;
         }
 
-        draw(beatScale, centerX, centerY) {
-            const rotX = this.x * beatScale;
-            const rotY = this.y * beatScale;
+        update() {
+            if (burstTimer > 0) {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.z += this.vz;
+                this.vx *= 0.96;
+                this.vy *= 0.96;
+                this.vz *= 0.96;
+            } else {
+                this.x += (this.tx - this.x) * this.ease;
+                this.y += (this.ty - this.y) * this.ease;
+                this.z += (this.tz - this.z) * this.ease;
+            }
+        }
 
-            const fov = 450;
-            const scale3D = fov / (fov + this.z);
+        draw(beat, cosR, sinR) {
+            // Y oxu ətrafında fırlanma
+            const rx = this.x * cosR + this.z * sinR;
+            const rz = -this.x * sinR + this.z * cosR;
 
-            const screenX = centerX + rotX * scale3D;
-            const screenY = centerY + rotY * scale3D;
-            const finalSize = Math.max(0.1, this.size * scale3D);
+            const px = rx * S * beat;
+            const py = this.y * S * beat;
+            const pz = rz * S * beat;
 
-            ctx.save();
-            ctx.globalAlpha = Math.max(0, this.alpha * scale3D);
-            ctx.fillStyle = this.color;
-            ctx.shadowBlur = 6 * scale3D;
-            ctx.shadowColor = this.color;
+            const denom = fov + pz;
+            if (denom < fov * 0.2) return;      // kameranın arxasında qalanları çəkmə
+            const sc = fov / denom;
 
-            ctx.beginPath();
-            ctx.arc(screenX, screenY, finalSize, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
+            const sx = cx + px * sc;
+            const sy = cy + py * sc;
+            if (sx < -50 || sx > W + 50 || sy < -50 || sy > H + 50) return;
+
+            const r = Math.max(0.6, this.size * 4 * sc);
+            ctx.globalAlpha = Math.min(1, Math.max(0, this.alpha * sc));
+            ctx.drawImage(this.sprite, sx - r, sy - r, r * 2, r * 2);
         }
     }
 
     class BeamParticle {
-        constructor(centerX, platformY, heartWidth) {
-            this.centerX = centerX;
-            this.platformY = platformY;
-            this.heartWidth = heartWidth;
+        constructor() {
             this.reset();
         }
 
         reset() {
-            this.x = this.centerX + (Math.random() - 0.5) * (this.heartWidth * 1.4);
-            this.y = this.platformY + (Math.random() - 0.5) * 20;
-            this.speedY = Math.random() * 2.5 + 1;
+            this.x = cx + (Math.random() - 0.5) * S * 1.4;
+            this.y = platformY + (Math.random() - 0.5) * S * 0.12;
+            this.speedY = (Math.random() * 2.5 + 1) * (S / 160);
             this.size = Math.random() * 1.5 + 0.3;
             this.alpha = Math.random() * 0.7 + 0.3;
-            this.color = BLUE_SHADES[Math.floor(Math.random() * BLUE_SHADES.length)];
+            this.sprite = sprites[Math.floor(Math.random() * sprites.length)];
         }
 
-        update(targetY) {
+        update() {
             this.y -= this.speedY;
             this.alpha -= 0.007;
-
-            if (this.y <= targetY || this.alpha <= 0) {
+            if (this.y <= cy || this.alpha <= 0) {
                 this.reset();
             }
         }
 
         draw() {
-            ctx.save();
+            const r = this.size * 4;
             ctx.globalAlpha = Math.max(0, this.alpha);
-            ctx.fillStyle = this.color;
-            ctx.shadowBlur = 8;
-            ctx.shadowColor = this.color;
-            ctx.beginPath();
-            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
+            ctx.drawImage(this.sprite, this.x - r, this.y - r, r * 2, r * 2);
         }
     }
 
-    const heartScale = 160;
-    const heartCenterY = canvas.height / 2 - 50;
-    const platformY = heartCenterY + 250;
-
-    for (let i = 0; i < particleCount; i++) {
-        particles.push(new HeartParticle(heartScale));
+    // ---------- Platforma (gradient ilə, shadowBlur-suz) ----------
+    function drawDisc(radius, stops) {
+        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+        stops.forEach(([pos, col]) => g.addColorStop(pos, col));
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, TAU);
+        ctx.fill();
     }
 
-    for (let i = 0; i < 120; i++) {
-        beamParticles.push(new BeamParticle(canvas.width / 2, platformY, heartScale));
-    }
-
-    function drawPlatform(cx, cy) {
+    function drawPlatform() {
         ctx.save();
-        ctx.translate(cx, cy);
+        ctx.translate(cx, platformY);
         ctx.scale(1, 0.22);
 
-        ctx.beginPath();
-        ctx.arc(0, 0, 260, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(37, 99, 235, 0.15)";
-        ctx.shadowBlur = 60;
-        ctx.shadowColor = "#3b82f6";
-        ctx.fill();
+        // Çox yumşaq işıq ləkəsi
+        drawDisc(S * 1.25, [
+            [0, "rgba(147, 197, 253, 0.28)"],
+            [0.5, "rgba(59, 130, 246, 0.10)"],
+            [1, "rgba(37, 99, 235, 0)"]
+        ]);
 
-        ctx.beginPath();
-        ctx.arc(0, 0, 180, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(147, 197, 253, 0.9)";
-        ctx.shadowBlur = 35;
-        ctx.shadowColor = "#60a5fa";
-        ctx.fill();
+        // Altdan genişlənən dalğa halqaları
+        ctx.lineWidth = 2.5;
+        for (let i = 0; i < 3; i++) {
+            const t = (time * 0.18 + i / 3) % 1;
+            const radius = S * (0.12 + 1.45 * t);
+            ctx.strokeStyle = "rgba(147, 197, 253, " + ((1 - t) * (1 - t) * 0.9).toFixed(3) + ")";
+            ctx.beginPath();
+            ctx.arc(0, 0, radius, 0, TAU);
+            ctx.stroke();
+        }
 
+        // Sabit nazik halqa
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = "rgba(191, 219, 254, 0.55)";
         ctx.beginPath();
-        ctx.arc(0, 0, 90, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255, 255, 255, 0.98)";
-        ctx.shadowBlur = 25;
-        ctx.shadowColor = "#ffffff";
-        ctx.fill();
+        ctx.arc(0, 0, S * 0.95, 0, TAU);
+        ctx.stroke();
 
         ctx.restore();
     }
 
+    // Halqanın ətrafında dövrə vuran parlaq zərrəciklər
+    function drawOrbit() {
+        const n = isSmallScreen ? 28 : 42;
+        for (let i = 0; i < n; i++) {
+            const a = time * 0.6 + (i / n) * TAU;
+            const x = cx + Math.cos(a) * S * 0.95;
+            const y = platformY + Math.sin(a) * S * 0.95 * 0.22;
+            const front = (Math.sin(a) + 1) / 2;           // önə yaxın olan böyük və parlaq
+            const r = 2.5 + front * 3;
+            ctx.globalAlpha = 0.35 + front * 0.65;
+            ctx.drawImage(sprites[i % sprites.length], x - r, y - r, r * 2, r * 2);
+        }
+    }
+
+    // ---------- Başlanğıc ----------
+    layout();
+
+    const particles = [];
+    const beamParticles = [];
+    for (let i = 0; i < PARTICLE_COUNT; i++) particles.push(new HeartParticle());
+    for (let i = 0; i < BEAM_COUNT; i++) beamParticles.push(new BeamParticle());
+
+    // ---------- Siçan / barmaq idarəsi ----------
+    let lastX = 0, downX = 0, downY = 0, moved = false;
+
+    canvas.addEventListener('pointerdown', e => {
+        dragging = true;
+        moved = false;
+        rotVel = 0;
+        lastX = downX = e.clientX;
+        downY = e.clientY;
+        canvas.setPointerCapture(e.pointerId);
+    });
+
+    canvas.addEventListener('pointermove', e => {
+        if (!dragging) return;
+        const dx = e.clientX - lastX;
+        lastX = e.clientX;
+        rotY += dx * 0.008;
+        rotVel = dx * 0.008;
+        if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) moved = true;
+    });
+
+    canvas.addEventListener('pointerup', e => {
+        if (!dragging) return;
+        dragging = false;
+        const dx = e.clientX - downX;
+        const dy = e.clientY - downY;
+        // Yuxarı sürüşdürmə: ürəklər tökülür
+        if (dy < -70 && Math.abs(dy) > Math.abs(dx) * 1.2) {
+            rotVel = 0;
+            triggerLove();
+            return;
+        }
+        if (!moved) triggerBurst();   // sadəcə toxunuş: partlayış
+    });
+
+    canvas.addEventListener('pointercancel', () => {
+        dragging = false;
+    });
+
+    function triggerBurst() {
+        if (burstTimer > 0) return;
+        burstTimer = 40;
+        particles.forEach(p => p.burst());
+    }
+
+    // ---------- Yuxarı sürüşdürəndə: ürək yağışı və "I love you" ----------
+    const swipeHint = document.getElementById('swipeHint');
+    const loveText = document.getElementById('loveText');
+    const loveLayer = document.getElementById('loveLayer');
+    const HEART_COLORS = ["#ff2d55", "#ff4d6d", "#e11d48", "#ff758f", "#ff0a54", "#f43f5e"];
+    let loveActive = false;
+    let loveTimer = 0;
+    let loveAmp = 0.03;   // döyünmənin gücü
+
+    function spawnFallingHeart() {
+        const h = document.createElement('span');
+        h.className = 'fall-heart';
+        h.textContent = '♥';
+        h.style.left = (Math.random() * 100) + 'vw';
+        h.style.fontSize = (14 + Math.random() * 26) + 'px';
+        h.style.color = HEART_COLORS[Math.floor(Math.random() * HEART_COLORS.length)];
+        h.style.animationDuration = (3.2 + Math.random() * 3) + 's';
+        h.style.setProperty('--sway', ((Math.random() - 0.5) * 120) + 'px');
+        h.style.setProperty('--rot', ((Math.random() - 0.5) * 160) + 'deg');
+        loveLayer.appendChild(h);
+        h.addEventListener('animationend', () => h.remove());
+    }
+
+    function triggerLove() {
+        if (loveActive) return;
+        loveActive = true;
+        loveTimer = 300;
+        swipeHint.classList.add('hidden');
+
+        // Yazı ürəyin mərkəzində görünür
+        const fs = Math.max(28, S * 0.4);
+        loveText.style.fontSize = fs + 'px';
+        loveText.style.top = (cy - fs * 0.7) + 'px';
+        loveText.classList.remove('show');
+        void loveText.offsetWidth;          // animasiyanı yenidən başlat
+        loveText.classList.add('show');
+
+        // Əvvəlcə bir dəstə, sonra davamlı yağış
+        for (let i = 0; i < 25; i++) spawnFallingHeart();
+        let count = 0;
+        const iv = setInterval(() => {
+            const n = 1 + Math.floor(Math.random() * 2);
+            for (let i = 0; i < n; i++) spawnFallingHeart();
+            if (++count >= 60) clearInterval(iv);
+        }, 70);
+
+        setTimeout(() => {
+            loveActive = false;
+            loveText.classList.remove('show');
+            swipeHint.classList.remove('hidden');
+        }, 6500);
+    }
+
+    // Kompüterdə: ↑ və ya boşluq düyməsi
+    window.addEventListener('keydown', e => {
+        if (e.key === 'ArrowUp' || e.key === ' ') {
+            e.preventDefault();
+            triggerLove();
+        }
+    });
+
+    // ---------- Animasiya ----------
     let time = 0;
 
     function animate() {
+        // İz effekti
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1;
         ctx.fillStyle = "rgba(3, 7, 18, 0.25)";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, W, H);
 
-        const cx = canvas.width / 2;
+        drawPlatform();
 
-        drawPlatform(cx, platformY);
+        // Parlayan hissəciklər (üst-üstə düşəndə işıq toplanır)
+        ctx.globalCompositeOperation = 'lighter';
 
-        beamParticles.forEach(bp => {
-            bp.update(heartCenterY);
-            bp.draw();
-        });
+        drawOrbit();
+
+        for (let i = 0; i < beamParticles.length; i++) {
+            beamParticles[i].update();
+            beamParticles[i].draw();
+        }
 
         time += 0.04;
-        const beatScale = 1 + Math.sin(time * 2) * 0.03; // Zəif nəfəs alma effekti (dönmə yoxdur)
+        // Döyünmə: ürək yağışı zamanı güclənir
+        if (loveTimer > 0) loveTimer--;
+        loveAmp += ((loveTimer > 0 ? 0.07 : 0.03) - loveAmp) * 0.05;
+        const beat = 1 + Math.sin(time * 2) * loveAmp;
 
-        particles.forEach(p => {
-            p.update();
-            p.draw(beatScale, cx, heartCenterY);
-        });
+        if (burstTimer > 0) burstTimer--;
+
+        // Fırlanma: buraxanda ətalətlə dönür, sonra yavaşca qarşıya qayıdır
+        if (!dragging) {
+            rotY += rotVel;
+            rotVel *= 0.95;
+            const home = Math.round(rotY / TAU) * TAU;
+            rotY += (home - rotY) * 0.02;
+        }
+        const cosR = Math.cos(rotY);
+        const sinR = Math.sin(rotY);
+
+        for (let i = 0; i < particles.length; i++) {
+            particles[i].update();
+            particles[i].draw(beat, cosR, sinR);
+        }
+
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1;
 
         requestAnimationFrame(animate);
     }
 
     animate();
 
+    // ---------- Pəncərə ölçüsü dəyişəndə ----------
     window.addEventListener('resize', () => {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        layout();
+        beamParticles.forEach(b => b.reset());
     });
 </script>
 
